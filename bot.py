@@ -324,6 +324,9 @@ class V4MPYR(commands.Bot):
         await self.load_extension("cogs.level")
         print("✅ Level Cog Loaded!")
 
+        await self.load_extension("cogs.quests")
+        print("✅ quests Cog Loaded!")
+
         guild = discord.Object(
             id=1233939059194466374
         )

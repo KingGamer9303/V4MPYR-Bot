@@ -2,6 +2,7 @@
 import random
 import time
 import aiosqlite
+import json
 
 DB_NAME = "v4mpyr.db"
 
@@ -79,6 +80,15 @@ async def setup_database():
             ("join_date", "INTEGER DEFAULT 0"),
             ("loan_tier", "INTEGER DEFAULT 1"),
             ("last_repayment", "INTEGER DEFAULT 0"),
+            ("quest_type", "TEXT DEFAULT ''"),
+            ("quest_goal", "INTEGER DEFAULT 0"),
+            ("quest_progress", "INTEGER DEFAULT 0"),
+            ("quest_reward", "INTEGER DEFAULT 0"),
+            ("quest_completed", "INTEGER DEFAULT 0"),
+            ("daily_quests_done", "INTEGER DEFAULT 0"),
+            ("quest_reset", "INTEGER DEFAULT 0"),
+            ("completed_quests", "TEXT DEFAULT '[]'"),
+
         ]
 
         cursor = await db.execute("PRAGMA table_info(users)")
@@ -176,6 +186,11 @@ async def add_blood(user_id, amount):
         )
         await db.commit()
 
+    await update_quest_progress(
+        user_id,
+        "blood",
+        amount
+    )
 
 
 async def add_xp(user_id, amount):
@@ -224,7 +239,9 @@ async def add_xp(user_id, amount):
 
         await db.commit()
 
-        return leveled_up, level, xp, required
+    await update_quest_progress(user_id, "xp", amount)
+
+    return leveled_up, level, xp, required
 
 async def get_level_data(user_id):
     await create_user(user_id)
@@ -274,7 +291,7 @@ async def set_level(user_id, level):
 
         await db.commit()
 
-        await db.commit()
+
 async def remove_blood(user_id, amount):
     await create_user(user_id)
 
@@ -1344,7 +1361,13 @@ async def deposit_blood(user_id, amount):
 
         await db.commit()
 
-        return True, amount
+    await update_quest_progress(
+        user_id,
+        "deposit",
+        amount
+    )
+
+    return True, amount
 
 
 async def withdraw_blood(user_id, amount):
@@ -1616,4 +1639,118 @@ async def set_xp(user_id, amount):
             )
         )
 
+        await db.commit()
+
+
+# =========================
+# QUEST SYSTEM
+# =========================
+
+QUESTS = [
+    {"type":"messages","goal":25,"reward":150},
+    {"type":"messages","goal":50,"reward":250},
+    {"type":"messages","goal":100,"reward":500},
+    {"type":"xp","goal":50,"reward":350},
+    {"type":"xp","goal":100,"reward":600},
+    {"type":"blood","goal":500,"reward":300},
+    {"type":"deposit","goal":1000,"reward":400},
+    {"type":"hunt","goal":1,"reward":500},
+]
+
+MAX_DAILY_QUESTS = 5
+
+
+async def get_current_quest(user_id):
+    await create_user(user_id)
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute(
+            """SELECT quest_type, quest_goal, quest_progress,
+            quest_reward, quest_completed, daily_quests_done
+            FROM users WHERE user_id=?""",
+            (user_id,)
+        )
+        return await cursor.fetchone()
+
+
+async def assign_quest(user_id):
+    await create_user(user_id)
+
+    quest = random.choice(QUESTS)
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            """UPDATE users SET quest_type=?, quest_goal=?,
+            quest_progress=0, quest_reward=?, quest_completed=0
+            WHERE user_id=?""",
+            (quest["type"], quest["goal"], quest["reward"], user_id)
+        )
+        await db.commit()
+
+    return await get_current_quest(user_id)
+
+
+async def update_quest_progress(user_id, quest_type, amount=1):
+    quest = await get_current_quest(user_id)
+
+    if not quest:
+        await assign_quest(user_id)
+        quest = await get_current_quest(user_id)
+
+    qtype, goal, progress, reward, completed, done = quest
+
+    if completed or qtype != quest_type:
+        return False
+
+    progress = min(goal, progress + amount)
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            """UPDATE users SET quest_progress=?,
+            quest_completed=? WHERE user_id=?""",
+            (progress, 1 if progress >= goal else 0, user_id)
+        )
+        await db.commit()
+
+    return progress >= goal
+
+
+async def finish_quest(user_id):
+    quest = await get_current_quest(user_id)
+
+    if not quest:
+        return False
+
+    qtype, goal, progress, reward, completed, done = quest
+
+    if progress < goal:
+        return False
+
+    await add_blood(user_id, reward)
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            """UPDATE users SET quest_type='',
+            quest_goal=0, quest_progress=0,
+            quest_reward=0, quest_completed=0,
+            daily_quests_done=daily_quests_done+1
+            WHERE user_id=?""",
+            (user_id,)
+        )
+        await db.commit()
+
+    return reward
+
+
+async def clear_quest(user_id):
+    await create_user(user_id)
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            """UPDATE users SET quest_type='',
+            quest_goal=0, quest_progress=0,
+            quest_reward=0, quest_completed=0
+            WHERE user_id=?""",
+            (user_id,)
+        )
         await db.commit()

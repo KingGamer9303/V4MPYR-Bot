@@ -7,6 +7,7 @@ from discord.ext import commands
 
 from database.database import (
     create_user,
+    finish_quest,
     get_balance,
     add_blood,
     remove_blood,
@@ -27,7 +28,9 @@ from database.database import (
     get_blood_moon,
     get_loan,
     take_loan,
-    repay_loan
+    repay_loan,
+    finish_quest,
+    update_quest_progress,
 )
 
 WIN_MESSAGES = [
@@ -423,6 +426,16 @@ You can no longer hunt or be hunted."""
                 interaction.user.id,
                 steal
             )
+            completed = await update_quest_progress(
+                interaction.user.id,
+                "hunt",
+                1
+            )
+
+            if completed:
+                await finish_quest(
+                    interaction.user.id
+                )
 
             embed = discord.Embed(
                 title="⚔️ Hunt Successful",
@@ -602,6 +615,7 @@ You can no longer hunt or be hunted."""
                 "⭐ Credit Score +5\n"
                 "⏳ 7 Day Loan Cooldown Started"
           ) 
+    
             else:
                 embed.title = "🩸 Loan Repayment"
                 embed.add_field(
